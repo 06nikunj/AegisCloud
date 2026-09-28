@@ -1,7 +1,8 @@
-node_modules/
 .env
-.env.local
+__pycache__/
+*.pyc
+.venv/
+node_modules/
 dist/
-build/
-.next/
-*.log
+.pytest_cache/
+mongo_data/
