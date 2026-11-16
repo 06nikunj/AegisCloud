@@ -1,3 +1,5 @@
+"""JWT creation/verification and the dependency that resolves the logged-in user."""
+
 from datetime import timedelta
 
 import jwt
@@ -13,6 +15,7 @@ bearer = HTTPBearer(auto_error=False)
 
 
 def create_access_token(user_id: str, role: str) -> str:
+    """Sign a short-lived access token for a user."""
     now = utcnow()
     payload = {
         "sub": user_id,
@@ -24,12 +27,18 @@ def create_access_token(user_id: str, role: str) -> str:
 
 
 def decode_access_token(token: str) -> dict:
+    """Verify a token's signature and expiry and return its payload (raises jwt.PyJWTError if invalid)."""
     return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
 
 
 async def get_current_user(
     creds: HTTPAuthorizationCredentials | None = Depends(bearer),
 ) -> dict:
+    """FastAPI dependency: the user document for the bearer token, or a 401.
+
+    The role is read from the database on every request, so a role change
+    takes effect immediately instead of when the token expires.
+    """
     unauthorized = HTTPException(
         status.HTTP_401_UNAUTHORIZED, "Not authenticated",
         headers={"WWW-Authenticate": "Bearer"},

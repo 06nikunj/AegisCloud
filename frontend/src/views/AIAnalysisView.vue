@@ -1,13 +1,140 @@
+<script setup>
+import { onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
+import { analyzeVulnerability } from '../services/aiService'
+import PageHeader from '../components/PageHeader.vue'
+import AppIcon from '../components/AppIcon.vue'
+
+const route = useRoute()
+const form = reactive({ cve_id: '', package: '', severity: 'HIGH', description: '' })
+const loading = ref(false)
+const error = ref('')
+const result = ref(null)
+
+const SAMPLE = {
+  cve_id: 'CVE-2021-44228',
+  package: 'log4j-core',
+  severity: 'CRITICAL',
+  description: 'The Apache Log4j2 library can be tricked into loading attacker-controlled code through crafted log messages, allowing remote code execution.',
+}
+
+function loadSample() { Object.assign(form, SAMPLE) }
+
+/** Run the analysis. The backend calls the AI provider and returns three structured sections. */
+async function analyze() {
+  if (!form.cve_id.trim()) {
+    error.value = 'Enter a CVE ID, for example CVE-2021-44228.'
+    return
+  }
+  loading.value = true
+  error.value = ''
+  result.value = null
+  try {
+    result.value = await analyzeVulnerability({ ...form })
+  } catch (e) {
+    error.value = e.response?.data?.detail || "Couldn't reach the AI engine. Check that the backend is running."
+  } finally {
+    loading.value = false
+  }
+}
+
+// Arriving from the scan page: pre-fill the form and run the analysis straight away.
+onMounted(() => {
+  const q = route.query
+  if (q.cve) {
+    form.cve_id = String(q.cve)
+    form.package = String(q.pkg || '')
+    form.severity = String(q.sev || 'HIGH').toUpperCase()
+    form.description = String(q.desc || '')
+    analyze()
+  }
+})
+</script>
+
 <template>
   <div class="page">
-    <h1>AI analysis</h1>
-    <section class="panel">
-      <p class="muted">Plain-English vulnerability explanations arrive in Week 4.</p>
-    </section>
+    <PageHeader title="AI analysis" crumb="AI analysis"
+                subtitle="Turn a raw CVE into a plain-English explanation, an attack scenario and fix steps." />
+
+    <div class="layout">
+      <section class="card">
+        <header class="card-head">
+          <h2>Vulnerability details</h2>
+          <button class="btn btn-outline btn-sm" type="button" @click="loadSample">Load sample</button>
+        </header>
+        <form class="card-body form" @submit.prevent="analyze">
+          <div class="field">
+            <label for="cve">CVE ID</label>
+            <input id="cve" v-model="form.cve_id" class="input" placeholder="CVE-2021-44228" autocomplete="off" />
+          </div>
+          <div class="two">
+            <div class="field">
+              <label for="pkg">Package</label>
+              <input id="pkg" v-model="form.package" class="input" placeholder="e.g. openssl" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="sev">Severity</label>
+              <select id="sev" v-model="form.severity" class="select">
+                <option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <label for="desc">Description <span class="muted opt">(optional)</span></label>
+            <textarea id="desc" v-model="form.description" class="textarea" placeholder="Paste the vulnerability description from the scan results"></textarea>
+          </div>
+          <p v-if="error" class="banner-error" role="alert">{{ error }}</p>
+          <button class="btn btn-brand" :disabled="loading">
+            <AppIcon name="spark" :size="16" />{{ loading ? 'Analyzing…' : 'Analyze vulnerability' }}
+          </button>
+          <p class="provider muted">Powered by Google Gemini on Google Cloud. Details are sent to the provider for analysis.</p>
+        </form>
+      </section>
+
+      <section class="output">
+        <div v-if="loading" class="card empty">Analyzing {{ form.cve_id }}…</div>
+        <div v-else-if="!result" class="card empty">
+          <strong>No analysis yet</strong>
+          Fill in a vulnerability and click Analyze, or use <em>Explain with AI</em> from a scan result.
+        </div>
+        <template v-else>
+          <article class="card result">
+            <header class="card-head"><h2><span class="num">1</span>What it is</h2></header>
+            <div class="card-body"><p>{{ result.what_it_is }}</p></div>
+          </article>
+          <article class="card result">
+            <header class="card-head"><h2><span class="num red">2</span>Attack scenario</h2></header>
+            <div class="card-body"><p>{{ result.attack_scenario }}</p></div>
+          </article>
+          <article class="card result">
+            <header class="card-head"><h2><span class="num green">3</span>Remediation steps</h2></header>
+            <div class="card-body">
+              <ol class="steps"><li v-for="(step, i) in result.remediation" :key="i">{{ step }}</li></ol>
+            </div>
+          </article>
+          <p class="muted model">Generated by {{ result.model }}. Always verify remediation steps before applying them to production.</p>
+        </template>
+      </section>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.page { display: flex; flex-direction: column; gap: 1.25rem; max-width: 70rem; }
-h1 { font-size: 1.6rem; }
+.layout { display: grid; grid-template-columns: 1fr 1.1fr; gap: 1.1rem; align-items: start; }
+.form { display: flex; flex-direction: column; gap: 1rem; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.opt { font-weight: 400; }
+.provider { font-size: 0.8rem; }
+.output { display: flex; flex-direction: column; gap: 1rem; }
+.result p { font-size: 0.95rem; line-height: 1.6; }
+.num {
+  display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+  margin-right: 0.55rem; border-radius: 999px; font-size: 0.78rem; background: #E6F0FB; color: var(--info);
+}
+.num.red { background: var(--crit-bg); color: var(--crit); }
+.num.green { background: var(--low-bg); color: var(--low); }
+.steps { margin: 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.6rem; font-size: 0.95rem; line-height: 1.55; }
+.model { font-size: 0.8rem; }
+@media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { .two { grid-template-columns: 1fr; } }
 </style>

@@ -1,22 +1,24 @@
-import { createRouter, createWebHistory } from 'vue-router'
-import { useAuthStore } from '../store/auth'
+<script setup>
+import { onMounted } from 'vue'
+import { useAuthStore } from './store/auth'
+import Navbar from './components/Navbar.vue'
+import AppFooter from './components/AppFooter.vue'
 
-const routes = [
-  { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { guest: true } },
-  { path: '/', name: 'dashboard', component: () => import('../views/DashboardView.vue'), meta: { auth: true } },
-  { path: '/scan', name: 'scan', component: () => import('../views/ScanView.vue'), meta: { auth: true } },
-  { path: '/alerts', name: 'alerts', component: () => import('../views/AlertsView.vue'), meta: { auth: true } },
-  { path: '/ai', name: 'ai', component: () => import('../views/AIAnalysisView.vue'), meta: { auth: true } },
-  { path: '/monitoring', name: 'monitoring', component: () => import('../views/MonitoringView.vue'), meta: { auth: true } },
-  { path: '/:pathMatch(.*)*', redirect: '/' },
-]
+const auth = useAuthStore()
+onMounted(() => auth.restore())
+</script>
 
-const router = createRouter({ history: createWebHistory(), routes })
+<template>
+  <div v-if="auth.isAuthenticated" class="shell">
+    <Navbar />
+    <main class="content"><router-view /></main>
+    <AppFooter />
+  </div>
+  <router-view v-else />
+</template>
 
-router.beforeEach((to) => {
-  const auth = useAuthStore()
-  if (to.meta.auth && !auth.isAuthenticated) return { name: 'login' }
-  if (to.meta.guest && auth.isAuthenticated) return { name: 'dashboard' }
-})
-
-export default router
+<style scoped>
+.shell { min-height: 100%; display: flex; flex-direction: column; background: var(--bg); }
+.content { flex: 1; width: 100%; max-width: 76rem; margin: 0 auto; padding: 1.75rem 2rem 1rem; }
+@media (max-width: 820px) { .content { padding: 1.25rem 1rem 0.5rem; } }
+</style>

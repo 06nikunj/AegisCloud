@@ -1,33 +1,87 @@
+name: aegiscloud
+
 services:
   mongo:
     image: mongo:7
-    container_name: aegiscloud-mongo
+    container_name: aegis-mongo
     restart: unless-stopped
+    ports:
+      - "27018:27017"          # host 27018 avoids clashing with a local MongoDB on 27017
     volumes:
       - mongo_data:/data/db
-    ports:
-      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   backend:
     build: ./backend
-    container_name: aegiscloud-backend
+    container_name: aegis-backend
     restart: unless-stopped
-    env_file: .env
-    depends_on:
-      - mongo
+    env_file: ./backend/.env   # secrets and Gemini/AWS keys, injected at runtime (never baked into the image)
+    environment:
+      MONGO_URI: mongodb://mongo:27017        # inside Docker the database is reached by service name
+      CORS_ORIGINS: http://localhost:5173
     ports:
       - "8000:8000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   frontend:
     build: ./frontend
-    container_name: aegiscloud-frontend
+    container_name: aegis-frontend
     restart: unless-stopped
     environment:
-      - VITE_API_PROXY=http://backend:8000
-    depends_on:
-      - backend
+      VITE_API_PROXY: http://backend:8000    # vite.config.js proxies /api and /health here
     ports:
       - "5173:5173"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: aegis-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: aegis-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: aegis-admin      # change this before sharing the machine
+      GF_AUTH_ANONYMOUS_ENABLED: "true"            # lets the Metrics page embed the dashboard
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer           # anonymous users can view, not edit
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
 
 volumes:
   mongo_data:
+  prometheus_data:
+  grafana_data:
